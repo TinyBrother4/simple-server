@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ultra Reactor Multiplayer Simulator</title>
+<style>
+body{margin:0;background:#02050a;color:#00ffcc;font-family:monospace;}
+h1{text-align:center;margin:4px;color:#00ffaa;}
+button{background:#111;color:#0f0;border:1px solid #0f0;padding:4px;cursor:pointer;}
+button:hover{background:#003333}
+.lamp{width:10px;height:10px;border-radius:50%;display:inline-block;background:#222;border:1px solid #444;}
+.on{background:#0f0}.warn{background:#fa0}.alarm{background:#f00;animation:blink 1s infinite;}
+@keyframes blink{50%{opacity:.3}}
+#rooms{display:flex;height:calc(100vh-120px)}
+.room{flex:1;display:none;padding:6px;overflow:auto}
+.room.active{display:block}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.panel{border:2px solid #0f0;background:#010308;padding:4px}
+.panel h2{margin:0 0 4px;font-size:12px;color:#66ffe0}
+.readout{font-size:15px}
+canvas{border:1px solid #0f0;background:#010308}
+#log{font-size:11px;height:100px;overflow:auto;background:#010308;padding:2px}
+textarea{width:100%;background:#000;color:#0f0;border:1px solid #0f0;}
+input{background:#000;color:#0f0;border:1px solid #0f0;}
+</style>
+</head>
+<body>
+
+<h1>ULTRA MULTIPLAYER REACTOR SIM</h1>
+
+<div style="display:flex;justify-content:space-between;padding:4px;">
+<div>
+<button onclick="switchRoom('control')">CONTROL</button>
+<button onclick="switchRoom('electrical')">ELECTRICAL</button>
+<button onclick="switchRoom('safety')">SAFETY</button>
+</div>
+<div>
+<button onclick="hostSession()">HOST</button>
+<input id="peerCode" placeholder="Enter Join Code">
+<button onclick="joinSession()">JOIN</button>
+</div>
+<div>
+<button onclick="scram()">SCRAM</button>
+</div>
+</div>
+
+<div id="rooms">
+<div class="room active" id="control">
+<div class="grid">
+<div class="panel">
+<h2>STATE</h2>
+<div class="readout" id="state">OFFLINE</div>
+<div class="lamp" id="stateLamp"></div>
+<button onclick="authorize()">AUTHORIZE</button>
+<div class="lamp" id="authLamp"></div>
+</div>
+<div class="panel">
+<h2>CORE ACTIVITY</h2>
+<div class="readout" id="activity">0.00</div>
+<button onclick="adj(0.02)">+</button>
+<button onclick="adj(-0.02)">−</button>
+</div>
+<div class="panel">
+<h2>THERMAL LOAD</h2>
+<div class="readout" id="thermal">15%</div>
+<div class="lamp" id="thermalLamp"></div>
+</div>
+<div class="panel">
+<h2>STABILITY</h2>
+<div class="readout" id="stability">100%</div>
+</div>
+<div class="panel" style="grid-column:span 2">
+<h2>TRENDS</h2>
+<canvas id="graph" width="420" height="140"></canvas>
+</div>
+<div class="panel">
+<h2>MISSION</h2>
+<div id="mission">STABILIZE SYSTEM</div>
+</div>
+</div>
+</div>
+
+<div class="room" id="electrical">
+<div class="grid">
+<div class="panel">
+<h2>PRIMARY LOOP</h2>
+<button onclick="toggle('primary')">TOGGLE</button>
+<div class="lamp" id="primaryLamp"></div>
+</div>
+<div class="panel">
+<h2>SECONDARY LOOP</h2>
+<button onclick="toggle('secondary')">TOGGLE</button>
+<div class="lamp" id="secondaryLamp"></div>
+</div>
+<div class="panel">
+<h2>AUX SYSTEMS</h2>
+<button onclick="toggle('aux')">ENABLE</button>
+<div class="lamp" id="auxLamp"></div>
+</div>
+<div class="panel">
+<h2>INTERLOCK</h2>
+<button onclick="toggle('interlock')">ARM</button>
+<div class="lamp" id="interlockLamp"></div>
+</div>
+</div>
+</div>
+
+<div class="room" id="safety">
+<div class="grid">
+<div class="panel">
+<h2>EVENT LOG</h2>
+<div id="log"></div>
+</div>
+<div class="panel">
+<h2>JOIN CODE</h2>
+<textarea id="sessionCode" rows="2" readonly></textarea>
+</div>
+</div>
+</div>
+</div>
+
+<script>
+// ===== CORE STATE =====
+let state="OFFLINE", auth=false, scrammed=false;
+let activity=0, thermal=15, stability=100, density=0;
+let systems={primary:false,secondary:false,aux:false,interlock:false};
+let histA=[], histT=[], histS=[];
+let mission={objectives:"STABILIZE SYSTEM", time:180};
+
+// ===== UI FUNCTIONS =====
+function switchRoom(r){document.querySelectorAll('.room').forEach(x=>x.classList.remove('active'));document.getElementById(r).classList.add('active');}
+function authorize(){auth=true; log("Authorization granted"); sendState();}
+function adj(v){if(auth&&!scrammed) activity=Math.max(0,Math.min(1,activity+v)); sendState();}
+function toggle(s){systems[s]=!systems[s]; log(s+" toggled"); sendState();}
+function scram(){scrammed=true; activity=0; state="LOCKDOWN"; log("SCRAM TRIGGERED"); sendState();}
+function log(msg){let l=document.getElementById("log"); l.innerHTML+=`> ${msg}<br>`; l.scrollTop=l.scrollHeight;}
+
+// ===== PROCEDURAL MISSION =====
+function newMission(){
+    mission.time=Math.floor(Math.random()*300)+60;
+    const types=["STABILIZE GRID","REDUCE THERMAL","MAINTAIN STABILITY","MANAGE AUX SYSTEM"];
+    mission.objectives=types[Math.floor(Math.random()*types.length)];
+    document.getElementById("mission").textContent=mission.objectives+" ("+mission.time+"s)";
+    sendState();
+}
+newMission();
+
+// ===== PHYSICS =====
+function physics(){if(scrammed)return;
+let support=Object.values(systems).filter(v=>v).length;
+density=activity*100; thermal+=density*0.04-support*0.5;
+stability+=(support>=2?0.3:-0.6);
+if(activity>0.05) state="ACTIVE";
+if(thermal>85) state="UNSTABLE";
+updateUI();}
+function updateUI(){
+document.getElementById("state").textContent=state;
+document.getElementById("activity").textContent=activity.toFixed(2);
+document.getElementById("thermal").textContent=Math.round(thermal)+"%";
+document.getElementById("stability").textContent=Math.round(stability)+"%";
+document.getElementById("stateLamp").className="lamp "+(state==="ACTIVE"?"on":state==="UNSTABLE"?"alarm":"");
+document.getElementById("authLamp").className="lamp "+(auth?"on":"");
+document.getElementById("thermalLamp").className="lamp "+(thermal>80?"alarm":thermal>60?"warn":"on");
+for(let s in systems) document.getElementById(s+"Lamp").className="lamp "+(systems[s]?"on":"");
+drawGraph();
+}
+
+// ===== TREND GRAPH =====
+function drawGraph(){const c=document.getElementById("graph"), ctx=c.getContext("2d");
+histA.push(activity); histT.push(thermal/100); histS.push(stability/100);
+if(histA.length>c.width){histA.shift(); histT.shift(); histS.shift();}
+ctx.clearRect(0,0,c.width,c.height);
+function draw(arr,color){ctx.strokeStyle=color; ctx.beginPath();
+arr.forEach((v,i)=>{let y=c.height-(v*c.height); if(i===0) ctx.moveTo(i,y); else ctx.lineTo(i,y);}); ctx.stroke();}
+draw(histA,"#0f0"); draw(histT,"#fa0"); draw(histS,"#f00");}
+
+// ===== MULTIPLAYER (Automatic Join Code + WebRTC via public signaling) =====
+let peers={}, channels={}, currentJoinCode="";
+function generateJoinCode(){return Math.random().toString(36).substring(2,8).toUpperCase();}
+
+// HOST: generates join code
+function hostSession(){
+    currentJoinCode = generateJoinCode();
+    document.getElementById("sessionCode").value = currentJoinCode;
+    log("Hosting session. Share code with friends: "+currentJoinCode);
+    // Here you would integrate a small WebSocket server to match peers automatically by code
+    // For now, this placeholder shows the join code
+}
+
+// JOIN
+function joinSession(){
+    let code = document.getElementById("peerCode").value.toUpperCase();
+    if(!code){log("Please enter a join code"); return;}
+    log("Joining session with code: "+code);
+    // Here you would use the signaling server to connect automatically
+}
+
+// ===== LOOP =====
+setInterval(()=>{physics(); sendState();},120);
+function sendState(){ /* placeholder for sending data via WebRTC */ }
+
+// ===== KEYBOARD =====
+document.addEventListener("keydown", e=>{if(e.key==="ArrowUp")adj(0.01); if(e.key==="ArrowDown")adj(-0.01); if(e.key===" ")scram();});
+</script>
+
+</body>
+</html>
