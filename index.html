@@ -11,7 +11,7 @@ button:hover{background:#003333}
 .lamp{width:10px;height:10px;border-radius:50%;display:inline-block;background:#222;border:1px solid #444;}
 .on{background:#0f0}.warn{background:#fa0}.alarm{background:#f00;animation:blink 1s infinite;}
 @keyframes blink{50%{opacity:.3}}
-#rooms{display:flex;height:calc(100vh-120px)}
+#rooms{display:flex;height:calc(100vh-180px)}
 .room{flex:1;display:none;padding:6px;overflow:auto}
 .room.active{display:block}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
@@ -34,16 +34,18 @@ input{background:#000;color:#0f0;border:1px solid #0f0;}
 <button onclick="switchRoom('electrical')">ELECTRICAL</button>
 <button onclick="switchRoom('safety')">SAFETY</button>
 </div>
+
 <div>
 <button onclick="hostSession()">HOST</button>
-<input id="peerCode" placeholder="Enter Join Code">
 <button onclick="joinSession()">JOIN</button>
 </div>
+
 <div>
 <button onclick="scram()">SCRAM</button>
 </div>
 </div>
 
+<!-- Rooms -->
 <div id="rooms">
 <div class="room active" id="control">
 <div class="grid">
@@ -112,8 +114,16 @@ input{background:#000;color:#0f0;border:1px solid #0f0;}
 <div id="log"></div>
 </div>
 <div class="panel">
-<h2>JOIN CODE</h2>
-<textarea id="sessionCode" rows="2" readonly></textarea>
+<h2>HOST CODE (copy to joiner)</h2>
+<textarea id="hostCode" rows="3" readonly></textarea>
+</div>
+<div class="panel">
+<h2>JOIN CODE (paste host code)</h2>
+<textarea id="joinCode" rows="3" placeholder="Paste host code here"></textarea>
+</div>
+<div class="panel">
+<h2>ANSWER (paste back to host)</h2>
+<textarea id="answerCode" rows="3" placeholder="Joiner will generate this"></textarea>
 </div>
 </div>
 </div>
@@ -127,7 +137,7 @@ let systems={primary:false,secondary:false,aux:false,interlock:false};
 let histA=[], histT=[], histS=[];
 let mission={objectives:"STABILIZE SYSTEM", time:180};
 
-// ===== UI FUNCTIONS =====
+// ===== UI =====
 function switchRoom(r){document.querySelectorAll('.room').forEach(x=>x.classList.remove('active'));document.getElementById(r).classList.add('active');}
 function authorize(){auth=true; log("Authorization granted"); sendState();}
 function adj(v){if(auth&&!scrammed) activity=Math.max(0,Math.min(1,activity+v)); sendState();}
@@ -174,32 +184,65 @@ function draw(arr,color){ctx.strokeStyle=color; ctx.beginPath();
 arr.forEach((v,i)=>{let y=c.height-(v*c.height); if(i===0) ctx.moveTo(i,y); else ctx.lineTo(i,y);}); ctx.stroke();}
 draw(histA,"#0f0"); draw(histT,"#fa0"); draw(histS,"#f00");}
 
-// ===== MULTIPLAYER (Automatic Join Code + WebRTC via public signaling) =====
-let peers={}, channels={}, currentJoinCode="";
-function generateJoinCode(){return Math.random().toString(36).substring(2,8).toUpperCase();}
+// ===== WEBRTC MANUAL SIGNALING =====
+let peerConnection=null, dataChannel=null;
 
-// HOST: generates join code
-function hostSession(){
-    currentJoinCode = generateJoinCode();
-    document.getElementById("sessionCode").value = currentJoinCode;
-    log("Hosting session. Share code with friends: "+currentJoinCode);
-    // Here you would integrate a small WebSocket server to match peers automatically by code
-    // For now, this placeholder shows the join code
+// HOST
+async function hostSession(){
+    peerConnection = new RTCPeerConnection();
+    dataChannel = peerConnection.createDataChannel("sim");
+    dataChannel.onmessage = e => receiveState(e.data);
+
+    peerConnection.onicecandidate = e => {
+        if(!e.candidate && peerConnection.localDescription){
+            document.getElementById("hostCode").value = btoa(peerConnection.localDescription.sdp);
+            log("Host code generated. Share with joiner.");
+        }
+    };
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
 }
 
-// JOIN
-function joinSession(){
-    let code = document.getElementById("peerCode").value.toUpperCase();
-    if(!code){log("Please enter a join code"); return;}
-    log("Joining session with code: "+code);
-    // Here you would use the signaling server to connect automatically
+// JOINER
+async function joinSession(){
+    const code = document.getElementById("joinCode").value;
+    if(!code){log("Paste host code first"); return;}
+
+    peerConnection = new RTCPeerConnection();
+    peerConnection.ondatachannel = e => { dataChannel = e.channel; dataChannel.onmessage = ev => receiveState(ev.data); };
+
+    const hostDesc = { type: "offer", sdp: atob(code) };
+    await peerConnection.setRemoteDescription(hostDesc);
+
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    document.getElementById("answerCode").value = btoa(answer.sdp);
+    log("Answer generated. Paste back to host to connect.");
+}
+
+// HOST PASTES JOINER ANSWER
+async function pasteAnswer(){
+    const code = document.getElementById("answerCode").value;
+    if(!code){log("Paste joiner answer"); return;}
+    await peerConnection.setRemoteDescription({ type:"answer", sdp: atob(code) });
+    log("Connection established!");
+}
+
+// ===== SEND STATE =====
+function sendState(){
+    const st={state,activity,thermal,stability,density,systems,mission};
+    if(dataChannel && dataChannel.readyState==="open") dataChannel.send(JSON.stringify(st));
+}
+function receiveState(data){
+    const st=JSON.parse(data);
+    state=st.state; activity=st.activity; thermal=st.thermal; stability=st.stability; density=st.density;
+    systems=st.systems; mission=st.mission;
+    updateUI();
 }
 
 // ===== LOOP =====
 setInterval(()=>{physics(); sendState();},120);
-function sendState(){ /* placeholder for sending data via WebRTC */ }
-
-// ===== KEYBOARD =====
 document.addEventListener("keydown", e=>{if(e.key==="ArrowUp")adj(0.01); if(e.key==="ArrowDown")adj(-0.01); if(e.key===" ")scram();});
 </script>
 
