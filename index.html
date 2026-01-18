@@ -113,18 +113,24 @@ input{background:#000;color:#0f0;border:1px solid #0f0;}
 <h2>EVENT LOG</h2>
 <div id="log"></div>
 </div>
+
 <div class="panel">
 <h2>HOST CODE (copy to joiner)</h2>
 <textarea id="hostCode" rows="3" readonly></textarea>
 </div>
+
 <div class="panel">
 <h2>JOIN CODE (paste host code)</h2>
 <textarea id="joinCode" rows="3" placeholder="Paste host code here"></textarea>
+<button onclick="joinSession()">GENERATE ANSWER</button>
 </div>
+
 <div class="panel">
 <h2>ANSWER (paste back to host)</h2>
 <textarea id="answerCode" rows="3" placeholder="Joiner will generate this"></textarea>
+<button onclick="pasteAnswer()">PASTE ANSWER</button>
 </div>
+
 </div>
 </div>
 </div>
@@ -210,7 +216,10 @@ async function joinSession(){
     if(!code){log("Paste host code first"); return;}
 
     peerConnection = new RTCPeerConnection();
-    peerConnection.ondatachannel = e => { dataChannel = e.channel; dataChannel.onmessage = ev => receiveState(ev.data); };
+    peerConnection.ondatachannel = e => { 
+        dataChannel = e.channel; 
+        dataChannel.onmessage = ev => receiveState(ev.data); 
+    };
 
     const hostDesc = { type: "offer", sdp: atob(code) };
     await peerConnection.setRemoteDescription(hostDesc);
@@ -224,9 +233,9 @@ async function joinSession(){
 // HOST PASTES JOINER ANSWER
 async function pasteAnswer(){
     const code = document.getElementById("answerCode").value;
-    if(!code){log("Paste joiner answer"); return;}
+    if(!code){log("Paste joiner answer first"); return;}
     await peerConnection.setRemoteDescription({ type:"answer", sdp: atob(code) });
-    log("Connection established!");
+    log("Connection established! 🎉");
 }
 
 // ===== SEND STATE =====
